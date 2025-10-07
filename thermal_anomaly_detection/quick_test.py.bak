@@ -1,0 +1,160 @@
+"""
+Thermal Anomaly Detection Test with Landsat Data
+"""
+import numpy as np
+import os
+import time
+from datetime import datetime
+import logging
+import rasterio
+from output_generator import create_output_generator
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+
+print("=" * 70)
+print("EUCLIDEAN TECHNOLOGIES - THERMAL ANOMALY DETECTION TEST")
+print("=" * 70)
+
+# Create test prediction map matching thermal data size
+prediction_map = np.zeros((128, 128), dtype=np.float32)
+
+# Add some simulated anomalies
+print("\n1. Creating test data...")
+
+# Industrial facility detection
+prediction_map[30:45, 40:60] = 0.7  # Facility perimeter
+prediction_map[35:40, 45:55] = 0.9  # Hot core area
+
+# Vehicle/machinery detections
+prediction_map[82:84, 40:60] = 0.8  # Vehicles on main road
+prediction_map[60:80, 51:53] = 0.8  # Vehicles on side road
+
+# Buildings and infrastructure
+for i in range(5):
+    y, x = np.random.randint(60, 100, 2)
+    prediction_map[y:y+8, x:x+8] = 0.85  # Detected buildings
+
+print(f"Created {prediction_map.shape} prediction map")
+print(f"Number of anomalies: {np.sum(prediction_map > 0.5)} pixels")
+
+# Initialize generator with enterprise settings
+print("\n2. Initializing Euclidean Technologies output generator...")
+generator = create_output_generator(
+    startup_name="Euclidean_Technologies",
+    output_dir="submission"  # Use the standard submission folder
+)
+
+# Example metrics
+metrics = {
+    'Accuracy': 0.94,
+    'F1': 0.88,
+    'ROC_AUC': 0.96,
+    'PR_AUC': 0.91,
+    'FPS': 15.8,
+    'GPU': 'GeForce 4GB',
+    'ModelSize_MB': 245.7,
+    'inference_times': [63.2, 59.8, 61.5],
+    'memory_usage': [2.1, 2.3, 2.2]
+}
+
+# Use actual Landsat thermal data
+input_path = r"E:\thermal\data\LC08_L2SP_138045_20250215_20250226_02_T1_ST_B10.TIF"
+model_path = os.path.join(os.getcwd(), "thermal_model.pth")
+
+print("\n3. Setting up test files...")
+print(f"Using Landsat thermal data: {os.path.basename(input_path)}")
+
+# First read the thermal data to get dimensions
+import rasterio
+with rasterio.open(input_path) as src:
+    height, width = src.shape
+    print(f"Thermal image dimensions: {width}x{height} pixels")
+
+# Add realistic thermal patterns
+# Industrial area
+thermal_data[30:45, 40:60] = np.random.normal(310, 1, (15, 20))  # Hot industrial zone ~37°C
+thermal_data[35:40, 45:55] = np.random.normal(320, 1, (5, 10))   # Very hot core ~47°C
+
+# Urban area with buildings
+for i in range(5):
+    y, x = np.random.randint(60, 100, 2)
+    thermal_data[y:y+8, x:x+8] = np.random.normal(305, 1, (8, 8))  # Buildings ~32°C
+
+# Roads/infrastructure (linear features)
+thermal_data[80:85, 20:100] = np.random.normal(300, 0.5, (5, 80))  # Main road ~27°C
+thermal_data[40:100, 50:55] = np.random.normal(300, 0.5, (60, 5))  # Side road
+
+# Create a valid GeoTIFF
+import rasterio
+from rasterio.transform import from_bounds
+
+transform = from_bounds(0, 0, width, height, width, height)
+with rasterio.open(
+    input_path,
+    'w',
+    driver='GTiff',
+    height=height,
+    width=width,
+    count=1,
+    dtype=thermal_data.dtype,
+    crs='+proj=latlong',
+    transform=transform,
+) as dst:
+    dst.write(thermal_data, 1)
+    # Add metadata
+    dst.update_tags(
+        TIFFTAG_DATETIME=datetime.now().strftime("%Y:%m:%d %H:%M:%S"),
+        AREA_OR_POINT="Area",
+        SATELLITE="Simulated",
+        THERMAL_UNIT="Kelvin"
+    )
+
+print(f"Created simulated thermal data ({width}x{height} px)")
+
+# Create sample model file
+with open(model_path, 'wb') as f:
+    f.write(b'SAMPLE_MODEL_DATA' * 1000)  # Make it a reasonable size
+print(f"Created sample model file: {os.path.basename(model_path)}")
+
+# Generate outputs
+print("\n4. Generating outputs...")
+try:
+    start_time = time.time()
+    
+    files = generator.generate_complete_submission(
+        prediction_map=prediction_map,
+        input_path=input_path,
+        model_path=model_path,
+        metrics=metrics
+    )
+    
+    duration = time.time() - start_time
+    print(f"\nGeneration completed in {duration:.1f} seconds")
+    
+    print("\nGenerated files:")
+    if files:
+        for key, path in files.items():
+            if os.path.exists(path):
+                size = os.path.getsize(path) / 1024  # KB
+                print(f"✅ {key}: {os.path.basename(path)} ({size:.1f} KB)")
+            else:
+                print(f"❌ {key}: File not found - {os.path.basename(path)}")
+    else:
+        print("No files were generated")
+        
+except Exception as e:
+    print(f"\n❌ Error: {str(e)}")
+    import traceback
+    traceback.print_exc()
+    
+finally:
+    print("\n5. Cleaning up...")
+    # Only clean up the model file, keep the Landsat data
+    if os.path.exists(model_path):
+        os.remove(model_path)
+        print(f"Removed {os.path.basename(model_path)}")
+
+print("\n" + "=" * 70)
+print(f"Test completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+print("=" * 70)
